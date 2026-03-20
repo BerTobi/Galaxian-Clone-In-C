@@ -23,9 +23,41 @@ typedef struct Entity
     Direction movingInDirection;
     Direction facing;
     int size;
+    float speed;
 } Entity;
 
-void Update(Entity** entities)
+int createEntity(Entity** entities, EntityType type, Vector2 position, int size, float speed)
+{
+    int freeSlot = 0;
+
+    for (int i = 0; i < MAX_ENTITIES; i++)
+    {
+        if (entities[i]->type == NONE)
+        {
+            freeSlot = i;
+            break;
+        }
+    }
+
+    Entity* newEntity = malloc(sizeof(Entity));
+    newEntity->type = type;
+    newEntity->position = position;
+    newEntity->size = size;
+    newEntity->speed = speed;
+    entities[freeSlot] = newEntity;
+
+    return freeSlot;
+}
+
+void shootProjectile(Entity** entities, Entity* shooter)
+{
+    Entity* projectile = entities[createEntity(entities, PROJECTILE, shooter->position, 5, 10.0f)];
+    projectile->movingInDirection = FORWARD;
+    return;
+}
+
+
+void Update(Entity** entities, int currentTick)
 {
     for (int i = 0; i < MAX_ENTITIES; i++)
     {
@@ -34,16 +66,16 @@ void Update(Entity** entities)
             switch (entities[i]->movingInDirection)
             {
             case FORWARD:
-                entities[i]->position.y -= 1;
+                entities[i]->position.y -= entities[i]->speed;
                 break;
             case BACKWARDS:
-                entities[i]->position.y += 1;
+                entities[i]->position.y += entities[i]->speed;
                 break;
             case LEFT:
-                entities[i]->position.x -= 1;
+                entities[i]->position.x -= entities[i]->speed;
                 break;
             case RIGHT:
-                entities[i]->position.x += 1;
+                entities[i]->position.x += entities[i]->speed;
                 break;
             }
 
@@ -64,6 +96,32 @@ void Update(Entity** entities)
             }
         }
     }
+
+    if (currentTick % 400 == 0)
+    {
+        for (int i = 0; i < MAX_ENTITIES; i++)
+        {
+            if (entities[i]->type == ENEMY && entities[i]->movingInDirection == LEFT)
+            {
+                entities[i]->movingInDirection = RIGHT;
+            }
+            else if (entities[i]->type == ENEMY && entities[i]->movingInDirection == RIGHT)
+            {
+                entities[i]->movingInDirection = LEFT;
+            }
+		}
+    }
+
+    //if (currentTick % 400 == 0)
+    //{
+    //    for (int i = 0; i < MAX_ENTITIES; i++)
+    //    {
+    //        if (entities[i]->type == ENEMY)
+    //        {
+    //            shootProjectile(entities, entities[i]);
+    //        }
+    //    }
+    //}
 }
 
 void Draw(Entity** entities)
@@ -88,40 +146,11 @@ void Draw(Entity** entities)
     EndDrawing();
 }
 
-int createEntity(Entity** entities, EntityType type, Vector2 position, int size)
-{
-    int freeSlot = 0;
-
-    for (int i = 0; i < MAX_ENTITIES; i++)
-    {
-        if (entities[i]->type == NONE)
-        {
-            freeSlot = i;
-            break;
-        }
-    }
-
-    Entity* newEntity = malloc(sizeof(Entity));
-    newEntity->type = type;
-    newEntity->position = position;
-    newEntity->size = size;
-    entities[freeSlot] = newEntity;
-
-    return freeSlot;
-}
-
-void shootProjectile(Entity** entities, Entity* shooter)
-{
-    Entity* projectile = entities[createEntity(entities, PROJECTILE, shooter->position, 5)];
-    projectile->movingInDirection = FORWARD;
-    return;
-}
-
 void HandleInput(Entity** entities, Entity* player)
 {
-    if (IsKeyDown(KEY_UP)) player->movingInDirection = FORWARD;
-    else if (IsKeyDown(KEY_DOWN)) player->movingInDirection = BACKWARDS;
-    else if (IsKeyDown(KEY_LEFT)) player->movingInDirection = LEFT;
+    //if (IsKeyDown(KEY_UP)) player->movingInDirection = FORWARD;
+    //else if (IsKeyDown(KEY_DOWN)) player->movingInDirection = BACKWARDS;
+    if (IsKeyDown(KEY_LEFT)) player->movingInDirection = LEFT;
     else if (IsKeyDown(KEY_RIGHT)) player->movingInDirection = RIGHT;
     else player->movingInDirection = NONE;
     if (IsKeyPressed(KEY_LEFT_CONTROL)) shootProjectile(entities, player);
@@ -131,9 +160,11 @@ int main()
 {
     const int screenWidth = 1920;
     const int screenHeight = 1080;
+    int currentTick = 200;
+    double lastTickTime = 0;
 
-    InitWindow(screenWidth, screenHeight, "Hello World");
-    SetTargetFPS(240);
+    InitWindow(screenWidth, screenHeight, "Galaxian Clone");
+    SetTargetFPS(60);
 
     Entity* entities[MAX_ENTITIES];
     int freeEntitySlot = 0;
@@ -144,21 +175,40 @@ int main()
         entities[i]->type = NONE;
     }
 
-    Vector2 startingPlayerPosition = { 900, 600 };
-    Entity* player = entities[createEntity(entities, PLAYER, startingPlayerPosition, 20)];
+    Vector2 startingPlayerPosition = { 900, 900 };
+    Entity* player = entities[createEntity(entities, PLAYER, startingPlayerPosition, 20, 5.0f)];
     player->movingInDirection = NONE;
     player->facing = FORWARD;
 
-    for (int i = 0; i < 10; i++)
+    for (int i = 0; i < 3; i++)
     {
-        Vector2 enemyPosition = { 300 + 100 * i, 100 };
-        createEntity(entities, ENEMY, enemyPosition, 20);
+        for (int j = 0; j < 10; j++)
+        {
+            Vector2 enemyPosition = { 500 + 100 * j, 100 + 100 * i };
+            createEntity(entities, ENEMY, enemyPosition, 20, 1.0f);
+        }
+    }
+
+    for (int i = 0; i < MAX_ENTITIES; i++)
+    {
+        if (entities[i]->type == ENEMY)
+        {
+            entities[i]->movingInDirection = LEFT;
+			entities[i]->facing = BACKWARDS;
+		}
     }
 
     while (!WindowShouldClose())
     {
+        
+
         HandleInput(entities, player);
-        Update(entities);
+        if (GetTime() - lastTickTime >= 0.01)
+        {
+            lastTickTime = GetTime();
+            currentTick++;
+            Update(entities, currentTick);
+		}
         Draw(entities);
     }
 
