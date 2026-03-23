@@ -52,6 +52,8 @@ int createEntity(Entity** entities, EntityType type, Vector2 position, int size,
     newEntity->position = position;
     newEntity->size = size;
     newEntity->speed = speed;
+	newEntity->movingInDirection = NONE;
+	newEntity->facing = NONE;
     entities[freeSlot] = newEntity;
 
     return freeSlot;
@@ -108,6 +110,87 @@ void shootProjectile(Entity** entities, Entity* shooter)
     return;
 }
 
+void UpdateEntityPosition(Entity* entity)
+{
+    switch (entity->movingInDirection)
+    {
+    case FORWARD:
+        entity->position.y -= entity->speed;
+        break;
+    case BACKWARDS:
+        entity->position.y += entity->speed;
+        break;
+    case LEFT:
+        entity->position.x -= entity->speed;
+        break;
+    case RIGHT:
+        entity->position.x += entity->speed;
+        break;
+    }
+
+    if (entity->position.x > GetScreenWidth() + 100 || entity->position.x < -100 || entity->position.y > GetScreenHeight() + 100 || entity->position.y < -100)
+    {
+        if (entity->type == PLAYER_PROJECTILE) playerProjectileActive = false;
+        entity->type = NONE;
+    }
+}
+
+void UpdateEnemyAI(Entity** entities, Entity* enemy, int currentTick)
+{
+    if (currentTick % 400 == 0)
+    {
+        if (enemy->movingInDirection == LEFT)
+        {
+            enemy->movingInDirection = RIGHT;
+        }
+        else if (enemy->movingInDirection == RIGHT)
+        {
+            enemy->movingInDirection = LEFT;
+        }
+        shootProjectile(entities, enemy);
+    }
+}
+
+void UpdateProjectileCollisions(Entity** entities, Entity* playerProjectile)
+{
+    for (int j = 0; j < MAX_ENTITIES; j++)
+    {
+        if (entities[j]->type == ENEMY)
+        {
+            if (CheckCollisionCircles(entities[j]->position, entities[j]->size / 2.5f, playerProjectile->position, playerProjectile->size / 2.5f))
+            {
+                playerProjectile->type = NONE;
+                entities[j]->type = NONE;
+                playerProjectileActive = false;
+                score += 20;
+                PlaySound(soundEffects[7]);
+            }
+        }
+    }
+}
+
+void UpdatePlayerCollisions(Entity** entities, Entity** player)
+{
+    for (int j = 0; j < MAX_ENTITIES; j++)
+    {
+        if (entities[j]->type == ENEMY_PROJECTILE)
+        {
+
+            if (CheckCollisionCircles((*player)->position, (*player)->size / 2.4f, entities[j]->position, entities[j]->size / 2.5f))
+            {
+                (*player)->type = NONE;
+                entities[j]->type = NONE;
+                PlaySound(soundEffects[4]);
+                for (int i = 0; i < MAX_ENTITIES; i++)
+                {
+                    free(entities[i]);
+                }
+                initializeGame(entities, player);
+                return;
+            }
+        }
+    }
+}
 
 void Update(Entity** entities, Entity** player, int currentTick)
 {
@@ -115,94 +198,19 @@ void Update(Entity** entities, Entity** player, int currentTick)
     {
         if (entities[i]->type != NONE)
         {
-            switch (entities[i]->movingInDirection)
-            {
-            case FORWARD:
-                entities[i]->position.y -= entities[i]->speed;
-                break;
-            case BACKWARDS:
-                entities[i]->position.y += entities[i]->speed;
-                break;
-            case LEFT:
-                entities[i]->position.x -= entities[i]->speed;
-                break;
-            case RIGHT:
-                entities[i]->position.x += entities[i]->speed;
-                break;
-            }
-
-            if (entities[i]->position.x > GetScreenWidth() + 100 || entities[i]->position.x < -100 || entities[i]->position.y > GetScreenHeight() + 100 || entities[i]->position.y < -100)
-            {
-                if (entities[i]->type == PLAYER_PROJECTILE) playerProjectileActive = false;
-                entities[i]->type = NONE;
-            }
+			UpdateEntityPosition(entities[i]);
+        }
+        if (entities[i]->type == ENEMY)
+        {
+            UpdateEnemyAI(entities, entities[i], currentTick);
         }
         if (entities[i]->type == PLAYER_PROJECTILE)
         {
-            for (int j = 0; j < MAX_ENTITIES; j++)
-            {
-                if (entities[j]->type == ENEMY)
-                {
-                    if (CheckCollisionCircles(entities[j]->position, entities[j]->size / 2.5f, entities[i]->position, entities[i]->size / 2.5f))
-                    {
-                        entities[i]->type = NONE;
-                        entities[j]->type = NONE;
-						playerProjectileActive = false;
-                        score += 20;
-                        PlaySound(soundEffects[7]);
-                    }
-                }
-            }
-        }
-        if (entities[i]->type == PLAYER)
-        {
-            for (int j = 0; j < MAX_ENTITIES; j++)
-            {
-                if (entities[j]->type == ENEMY_PROJECTILE)
-                {
-                
-                    if (CheckCollisionCircles(entities[i]->position, entities[i]->size / 2.4f, entities[j]->position, entities[j]->size / 2.5f))
-                    {
-                        entities[i]->type = NONE;
-                        entities[j]->type = NONE;
-                        PlaySound(soundEffects[4]);
-                        for (int i = 0; i < MAX_ENTITIES; i++)
-                        {
-                            free(entities[i]);
-                        }
-						initializeGame(entities, player);
-                        return;
-                    }
-                }
-            }
+			UpdateProjectileCollisions(entities, entities[i]);
         }
     }
+    UpdatePlayerCollisions(entities, player);
 
-    if (currentTick % 400 == 0)
-    {
-        for (int i = 0; i < MAX_ENTITIES; i++)
-        {
-            if (entities[i]->type == ENEMY && entities[i]->movingInDirection == LEFT)
-            {
-                entities[i]->movingInDirection = RIGHT;
-            }
-            else if (entities[i]->type == ENEMY && entities[i]->movingInDirection == RIGHT)
-            {
-                entities[i]->movingInDirection = LEFT;
-            }
-		}
-    }
-
-    if (currentTick % 400 == 0)
-    {
-        for (int i = 0; i < MAX_ENTITIES; i++)
-        {
-            if (entities[i]->type == ENEMY)
-            {
-                shootProjectile(entities, entities[i]);
-            }
-        }
-    }
 }
 
 void Draw(RenderTexture2D target, Entity** entities, Texture2D* spritesheet)
@@ -244,8 +252,6 @@ void Draw(RenderTexture2D target, Entity** entities, Texture2D* spritesheet)
 
 void HandleInput(Entity** entities, Entity* player)
 {
-    //if (IsKeyDown(KEY_UP)) player->movingInDirection = FORWARD;
-    //else if (IsKeyDown(KEY_DOWN)) player->movingInDirection = BACKWARDS;
     if (IsKeyDown(KEY_LEFT)) player->movingInDirection = LEFT;
     else if (IsKeyDown(KEY_RIGHT)) player->movingInDirection = RIGHT;
     else player->movingInDirection = NONE;
@@ -260,6 +266,7 @@ int main()
 
     InitWindow(screenWidth, screenHeight, "Galaxian Clone");
     InitAudioDevice();
+    DisableCursor();
     SetTargetFPS(60);
 
     if (IsAudioDeviceReady())
