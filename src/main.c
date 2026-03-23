@@ -1,10 +1,11 @@
+#include <stdlib.h>
+#include <stdio.h>
 #include "raylib.h"
+#include <assert.h>
 
 #define MAX_ENTITIES 1000
 #define NONE -1
 
-int score = 0;
-bool playerProjectileActive = false;
 const int screenWidth = 896;
 const int screenHeight = 1024;
 
@@ -24,17 +25,44 @@ typedef enum EntityType {
     ENEMY
 } EntityType;
 
+typedef enum EnemyBehaviour {
+    IN_FORMATION,
+    DIVING,
+    RETURNING
+} EnemyBehaviour;
+
+typedef struct EnemyFormation
+{
+    Vector2 center;
+    Direction movingInDirection;
+} EnemyFormation;
+
+typedef union EntityData
+{
+    struct { EnemyBehaviour behaviour; Vector2 formationOffset; EnemyFormation* formation; } enemyData;
+} EntityData;
+
 typedef struct Entity
 {
     EntityType type;
     Vector2 position;
     Direction movingInDirection;
     Direction facing;
-    int size;
+    float size;
     float speed;
+	EntityData data;
 } Entity;
 
-int createEntity(Entity** entities, EntityType type, Vector2 position, int size, float speed)
+typedef struct GameData
+{
+    Entity** entities;
+    Entity* player;
+	EnemyFormation* enemyFormation;
+    int score;
+    bool playerProjectileActive;
+} GameData;
+
+int createEntity(Entity** entities, EntityType type, Vector2 position, float size, float speed)
 {
     int freeSlot = 0;
 
@@ -48,6 +76,7 @@ int createEntity(Entity** entities, EntityType type, Vector2 position, int size,
     }
 
     Entity* newEntity = malloc(sizeof(Entity));
+    assert(newEntity != NULL);
     newEntity->type = type;
     newEntity->position = position;
     newEntity->size = size;
@@ -59,58 +88,66 @@ int createEntity(Entity** entities, EntityType type, Vector2 position, int size,
     return freeSlot;
 }
 
-void initializeGame(Entity** entities, Entity** player)
+void initializeGame(GameData* gameData)
 {
-    score = 0;
-    playerProjectileActive = false;
+    if (gameData->entities != NULL) free(gameData->entities);
+    if (gameData->enemyFormation != NULL) free(gameData->enemyFormation);
+	gameData->score = 0;
+    gameData->playerProjectileActive = false;
+	gameData->player = NULL;
+	gameData->entities = malloc(sizeof(Entity*) * MAX_ENTITIES);
+    gameData->enemyFormation = malloc(sizeof(EnemyFormation));
+    assert(gameData->entities != NULL);
+    assert(gameData->enemyFormation != NULL);
 
     for (int i = 0; i < MAX_ENTITIES; i++)
     {
-        entities[i] = malloc(sizeof(Entity));
-        entities[i]->type = NONE;
+        gameData->entities[i] = malloc(sizeof(Entity));
+        assert(gameData->entities[i] != NULL);
+        gameData->entities[i]->type = NONE;
     }
 
     Vector2 startingPlayerPosition = { 100, 235 };
-    *player = entities[createEntity(entities, PLAYER, startingPlayerPosition, 20, 1.0f)];
-    (*player)->movingInDirection = NONE;
-    (*player)->facing = FORWARD;
+    gameData->player = gameData->entities[createEntity(gameData->entities, PLAYER, startingPlayerPosition, 20, 1.0f)];
+    gameData->player->movingInDirection = NONE;
+    gameData->player->facing = FORWARD;
+    
+	gameData->enemyFormation->center = (Vector2){ 150, 100 };
+    gameData->enemyFormation->movingInDirection = LEFT;
 
     for (int i = 0; i < 3; i++)
     {
         for (int j = 0; j < 10; j++)
         {
-            Vector2 enemyPosition = { 50 + 16 * j, 50 + 16 * i };
-            createEntity(entities, ENEMY, enemyPosition, 16, 0.4f);
-        }
-    }
-
-    for (int i = 0; i < MAX_ENTITIES; i++)
-    {
-        if (entities[i]->type == ENEMY)
-        {
-            entities[i]->movingInDirection = LEFT;
-            entities[i]->facing = BACKWARDS;
+            
+            Entity* enemy = gameData->entities[createEntity(gameData->entities, ENEMY, (Vector2) {0, 0}, 16, 0.4f)];
+            Vector2 enemyPosition = { -80.0f + 16.0f * j, -50.0f + 16.0f * i };
+			enemy->data.enemyData.formationOffset = enemyPosition;
+			enemy->data.enemyData.behaviour = IN_FORMATION;
+            enemy->position = (Vector2){ gameData->enemyFormation->center.x + enemyPosition.x, gameData->enemyFormation->center.y + enemyPosition.y };
+			enemy->movingInDirection = LEFT;
+			enemy->facing = BACKWARDS;
         }
     }
 }
 
-void shootProjectile(Entity** entities, Entity* shooter)
+void shootProjectile(GameData* gameData, Entity* shooter)
 {
 	EntityType projectileType = NONE;
-    if (shooter->type == PLAYER && !playerProjectileActive)
+    if (shooter->type == PLAYER && !gameData->playerProjectileActive)
     {
         projectileType = PLAYER_PROJECTILE;
-        playerProjectileActive = true;
+        gameData->playerProjectileActive = true;
 		PlaySound(soundEffects[3]);
     }
     else if (shooter->type == ENEMY) projectileType = ENEMY_PROJECTILE;
     
-    Entity* projectile = entities[createEntity(entities, projectileType, shooter->position, 2, 2.0f)];
+    Entity* projectile = gameData->entities[createEntity(gameData->entities, projectileType, shooter->position, 2, 2.0f)];
     projectile->movingInDirection = shooter->facing;
     return;
 }
 
-void UpdateEntityPosition(Entity* entity)
+void UpdateEntityPosition(GameData* gameData, Entity* entity)
 {
     switch (entity->movingInDirection)
     {
@@ -130,119 +167,126 @@ void UpdateEntityPosition(Entity* entity)
 
     if (entity->position.x > GetScreenWidth() + 100 || entity->position.x < -100 || entity->position.y > GetScreenHeight() + 100 || entity->position.y < -100)
     {
-        if (entity->type == PLAYER_PROJECTILE) playerProjectileActive = false;
+        if (entity->type == PLAYER_PROJECTILE) gameData->playerProjectileActive = false;
         entity->type = NONE;
     }
 }
 
-void UpdateEnemyAI(Entity** entities, Entity* enemy, int currentTick)
+void UpdateEnemyAI(GameData* gameData, Entity* enemy, int currentTick)
 {
+    if (enemy->data.enemyData.behaviour == IN_FORMATION)
+    {
+		enemy->movingInDirection = gameData->enemyFormation->movingInDirection;
+	}
     if (currentTick % 400 == 0)
     {
-        if (enemy->movingInDirection == LEFT)
-        {
-            enemy->movingInDirection = RIGHT;
-        }
-        else if (enemy->movingInDirection == RIGHT)
-        {
-            enemy->movingInDirection = LEFT;
-        }
-        shootProjectile(entities, enemy);
+        shootProjectile(gameData, enemy);
     }
 }
 
-void UpdateProjectileCollisions(Entity** entities, Entity* playerProjectile)
+void UpdateProjectileCollisions(GameData* gameData, Entity* playerProjectile)
 {
     for (int j = 0; j < MAX_ENTITIES; j++)
     {
-        if (entities[j]->type == ENEMY)
+        if (gameData->entities[j]->type == ENEMY)
         {
-            if (CheckCollisionCircles(entities[j]->position, entities[j]->size / 2.5f, playerProjectile->position, playerProjectile->size / 2.5f))
+            if (CheckCollisionCircles(gameData->entities[j]->position, gameData->entities[j]->size / 2.5f, playerProjectile->position, playerProjectile->size / 2.5f))
             {
                 playerProjectile->type = NONE;
-                entities[j]->type = NONE;
-                playerProjectileActive = false;
-                score += 20;
+                gameData->entities[j]->type = NONE;
+                gameData->playerProjectileActive = false;
+                gameData->score += 20;
                 PlaySound(soundEffects[7]);
             }
         }
     }
 }
 
-void UpdatePlayerCollisions(Entity** entities, Entity** player)
+void UpdatePlayerCollisions(GameData* gameData)
 {
     for (int j = 0; j < MAX_ENTITIES; j++)
     {
-        if (entities[j]->type == ENEMY_PROJECTILE)
+        if (gameData->entities[j]->type == ENEMY_PROJECTILE)
         {
 
-            if (CheckCollisionCircles((*player)->position, (*player)->size / 2.4f, entities[j]->position, entities[j]->size / 2.5f))
+            if (CheckCollisionCircles(gameData->player->position, gameData->player->size / 2.4f, gameData->entities[j]->position, gameData->entities[j]->size / 2.5f))
             {
-                (*player)->type = NONE;
-                entities[j]->type = NONE;
+                gameData->player->type = NONE;
+                gameData->entities[j]->type = NONE;
                 PlaySound(soundEffects[4]);
                 for (int i = 0; i < MAX_ENTITIES; i++)
                 {
-                    free(entities[i]);
+                    free(gameData->entities[i]);
                 }
-                initializeGame(entities, player);
+                initializeGame(gameData);
                 return;
             }
         }
     }
 }
 
-void Update(Entity** entities, Entity** player, int currentTick)
+void Update(GameData* gameData, int currentTick)
 {
     for (int i = 0; i < MAX_ENTITIES; i++)
     {
-        if (entities[i]->type != NONE)
+        if (gameData->entities[i]->type != NONE)
         {
-			UpdateEntityPosition(entities[i]);
+			UpdateEntityPosition(gameData, gameData->entities[i]);
         }
-        if (entities[i]->type == ENEMY)
+        if (gameData->entities[i]->type == ENEMY)
         {
-            UpdateEnemyAI(entities, entities[i], currentTick);
+            UpdateEnemyAI(gameData, gameData->entities[i], currentTick);
         }
-        if (entities[i]->type == PLAYER_PROJECTILE)
+        if (gameData->entities[i]->type == PLAYER_PROJECTILE)
         {
-			UpdateProjectileCollisions(entities, entities[i]);
+			UpdateProjectileCollisions(gameData, gameData->entities[i]);
         }
     }
-    UpdatePlayerCollisions(entities, player);
+    if (currentTick % 400 == 0)
+    {
+        if (gameData->enemyFormation->movingInDirection == LEFT)
+        {
+            gameData->enemyFormation->movingInDirection = RIGHT;
+        }
+        else if (gameData->enemyFormation->movingInDirection == RIGHT)
+        {
+            gameData->enemyFormation->movingInDirection = LEFT;
+        }
+    }
+    UpdatePlayerCollisions(gameData);
 
 }
 
-void Draw(RenderTexture2D target, Entity** entities, Texture2D* spritesheet)
+void Draw(RenderTexture2D target, GameData* gameData, Texture2D* spritesheet)
 {
     BeginTextureMode(target);
     ClearBackground(BLACK);
     for (int i = 0; i < MAX_ENTITIES; i++)
     {
-        Rectangle spritePosition = (Rectangle){ entities[i]->position.x - (entities[i]->size / 2), entities[i]->position.y - (entities[i]->size / 2), entities[i]->size, entities[i]->size };
-        if (entities[i]->type == PLAYER)
+        Rectangle spritePosition = (Rectangle){ gameData->entities[i]->position.x - (gameData->entities[i]->size / 2.0f), gameData->entities[i]->position.y - (gameData->entities[i]->size / 2.0f), gameData->entities[i]->size, gameData->entities[i]->size };
+        if (gameData->entities[i]->type == PLAYER)
         {
             DrawTexturePro(*spritesheet, (Rectangle) { 1, 70, 16, 16 }, spritePosition, (Vector2) { 0, 0 }, 0.0f, WHITE);
         }
-        if (entities[i]->type == PLAYER_PROJECTILE || entities[i]->type == ENEMY_PROJECTILE)
+        if (gameData->entities[i]->type == PLAYER_PROJECTILE || gameData->entities[i]->type == ENEMY_PROJECTILE)
         {
             DrawTexturePro(*spritesheet, (Rectangle) { 200, 97, 1, 2 }, spritePosition, (Vector2) { 0, 0 }, 0.0f, WHITE);
         }
-        if (entities[i]->type == ENEMY)
+        if (gameData->entities[i]->type == ENEMY)
         {
             DrawTexturePro(*spritesheet, (Rectangle) { 1, 34, 16, 16 }, spritePosition, (Vector2) { 0, 0 }, 0.0f, WHITE);
         }
     }
     char sScore[20];
-    sprintf(sScore, "SCORE: %i", score);
+    sprintf(sScore, "SCORE: %i", gameData->score);
     DrawText(sScore, 10, 10, 8, WHITE);
     EndTextureMode();
 
     BeginDrawing();
     ClearBackground(BLACK);
     DrawTexturePro(target.texture,
-        (Rectangle) {0, 0, 224, -256},   // source (negative height flips it)
-        (Rectangle) {0, 0, screenWidth, screenHeight}, // destination
+        (Rectangle) {0, 0, 224.0f, -256.0f},   // source (negative height flips it)
+        (Rectangle) {0, 0, (float)screenWidth, (float)screenHeight}, // destination
         (Vector2) {0, 0},
         0.0f,
         WHITE
@@ -250,12 +294,12 @@ void Draw(RenderTexture2D target, Entity** entities, Texture2D* spritesheet)
     EndDrawing();
 }
 
-void HandleInput(Entity** entities, Entity* player)
+void HandleInput(GameData* gameData, Entity* player)
 {
     if (IsKeyDown(KEY_LEFT)) player->movingInDirection = LEFT;
     else if (IsKeyDown(KEY_RIGHT)) player->movingInDirection = RIGHT;
     else player->movingInDirection = NONE;
-    if (IsKeyPressed(KEY_LEFT_CONTROL)) shootProjectile(entities, player);
+    if (IsKeyPressed(KEY_LEFT_CONTROL)) shootProjectile(gameData, gameData->player);
 }
 
 int main()
@@ -279,41 +323,42 @@ int main()
 	}
 
     Texture2D spritesheet = LoadTexture("res/Spritesheet.png");
-    if (spritesheet.id == NULL)
+    if (!spritesheet.id)
     {
         printf("%s\n", GetWorkingDirectory());
         printf("Failed to load spritesheet\n");
     }
 
 	soundEffects = malloc(sizeof(Sound) * 8);
+    assert(soundEffects != NULL);
 	soundEffects[3] = LoadSound("res/03.Shoot.mp3");
     soundEffects[4] = LoadSound("res/04. Fighter Loss.mp3");
     soundEffects[7] = LoadSound("res/07. Hit Enemy.mp3");
 
-    Entity* entities[MAX_ENTITIES];
-    Entity* player = malloc(sizeof(Entity));
-    
-    initializeGame(entities, &player);
+	GameData* gameData = calloc(1, sizeof(GameData));
+    assert(gameData != NULL);
+
+    initializeGame(gameData);
 
     RenderTexture2D target = LoadRenderTexture(224, 256);
 
     while (!WindowShouldClose())
     {
         
-        HandleInput(entities, player);
+        HandleInput(gameData, gameData->player);
         if (GetTime() - lastTickTime >= 0.01)
         {
             lastTickTime = GetTime();
             currentTick++;
-            Update(entities, &player, currentTick);
+            Update(gameData, currentTick);
 		}
-        Draw(target, entities, &spritesheet);
+        Draw(target, gameData, &spritesheet);
     }
 
-    for (int i = 0; i < MAX_ENTITIES; i++)
-    {
-        free(entities[i]);
-    }
+    //for (int i = 0; i < MAX_ENTITIES; i++)
+    //{
+    //    free(entities[i]);
+    //}
     CloseWindow();
     return 0;
 }
