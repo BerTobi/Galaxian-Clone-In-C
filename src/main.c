@@ -400,6 +400,22 @@ void HandleInput(GameData* gameData, Entity* player)
     if (IsKeyPressed(KEY_LEFT_CONTROL)) shootProjectile(gameData, gameData->player);
 }
 
+void cleanup(GameData* gameData)
+{
+    for (int i = 0; i < 8; i++)
+    {
+        UnloadSound(soundEffects[i]);
+    }
+	free(soundEffects);
+
+    for (int i = 0; i < MAX_ENTITIES; i++)
+    {
+        free(gameData->entities[i]);
+	}
+    if (gameData->entities != NULL) free(gameData->entities);
+    if (gameData->enemyFormation != NULL) free(gameData->enemyFormation);
+}
+
 int main()
 {
     srand((unsigned int) time(NULL));
@@ -462,10 +478,8 @@ int main()
         Draw(target, gameData, &spritesheet);
     }
 
-    //for (int i = 0; i < MAX_ENTITIES; i++)
-    //{
-    //    free(entities[i]);
-    //}
+    cleanup(gameData);
+
     CloseWindow();
     return 0;
 }
