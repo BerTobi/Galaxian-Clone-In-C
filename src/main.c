@@ -13,6 +13,16 @@ const int screenHeight = 1024;
 
 Sound* soundEffects;
 
+typedef struct Animation {
+    Rectangle* frames;
+    int frameCount;
+    int currentFrame;
+    int ticksPerFrame;
+    int lastFrameTick;
+} Animation;
+
+Animation** animations;
+
 typedef enum Direction {
     FORWARD,
     BACKWARDS,
@@ -33,6 +43,12 @@ typedef enum EnemyBehaviour {
     DIVING,
     RETURNING
 } EnemyBehaviour;
+
+typedef enum EntityState {
+    ALIVE,
+    DYING,
+    DEAD
+} EntityState;
 
 typedef struct EnemyFormation
 {
@@ -58,10 +74,13 @@ typedef struct Entity
     EntityType type;
     Vector2 position;
     Vector2 velocity;
+	EntityState state;
     Direction facing;
     float size;
     float speed;
 	EntityData data;
+	Animation movementAnimation;
+	Animation deathAnimation;
 } Entity;
 
 typedef struct GameData
@@ -126,6 +145,8 @@ void initializeGame(GameData* gameData)
     gameData->player = gameData->entities[createEntity(gameData->entities, PLAYER, startingPlayerPosition, 20, 1.0f)];
 	gameData->player->velocity = (Vector2){ 0, 0 };
     gameData->player->facing = FORWARD;
+	gameData->player->deathAnimation = *animations[3];
+	gameData->player->state = ALIVE;
     
 	gameData->enemyFormation->center = (Vector2){ 112, 100 };
     gameData->enemyFormation->movinginDirection = LEFT;
@@ -145,6 +166,9 @@ void initializeGame(GameData* gameData)
             enemy->position = (Vector2){ gameData->enemyFormation->center.x + enemyPosition.x, gameData->enemyFormation->center.y + enemyPosition.y };
 			enemy->velocity = (Vector2){ 0, 0 };
 			enemy->facing = BACKWARDS;
+            enemy->movementAnimation = *animations[0];
+			enemy->deathAnimation = *animations[2];
+            enemy->state = ALIVE;
         }
     }
     for (int i = 0; i < 8; i++)
@@ -157,7 +181,10 @@ void initializeGame(GameData* gameData)
         enemy->data.enemyData.type = 1;
         enemy->position = (Vector2){ gameData->enemyFormation->center.x + enemyPosition.x, gameData->enemyFormation->center.y + enemyPosition.y };
         enemy->velocity = (Vector2){ 0, 0 };
-        enemy->facing = BACKWARDS;       
+        enemy->facing = BACKWARDS;  
+        enemy->movementAnimation = *animations[1];
+        enemy->deathAnimation = *animations[2];
+        enemy->state = ALIVE;
     }
 }
 
@@ -253,12 +280,12 @@ void UpdateProjectileCollisions(GameData* gameData, Entity* playerProjectile)
 {
     for (int j = 0; j < MAX_ENTITIES; j++)
     {
-        if (gameData->entities[j]->type == ENEMY)
+        if (gameData->entities[j]->type == ENEMY && gameData->entities[j]->state == ALIVE)
         {
             if (CheckCollisionCircles(gameData->entities[j]->position, gameData->entities[j]->size / 2.5f, playerProjectile->position, playerProjectile->size / 2.5f))
             {
                 playerProjectile->type = NONE;
-                gameData->entities[j]->type = NONE;
+                gameData->entities[j]->state = DYING;
                 gameData->playerProjectileCount--;
                 gameData->score += 20;
                 PlaySound(soundEffects[7]);
@@ -284,15 +311,9 @@ void UpdatePlayerCollisions(GameData* gameData)
 
             if (CheckCollisionCircles(gameData->player->position, gameData->player->size / 2.4f, gameData->entities[j]->position, gameData->entities[j]->size / 2.5f))
             {
-                gameData->player->type = NONE;
+                gameData->player->state = DYING;
                 gameData->entities[j]->type = NONE;
                 PlaySound(soundEffects[4]);
-                for (int i = 0; i < MAX_ENTITIES; i++)
-                {
-                    free(gameData->entities[i]);
-                }
-                initializeGame(gameData);
-                return;
             }
         }
     }
@@ -310,10 +331,52 @@ void Update(GameData* gameData, int currentTick)
         if (gameData->entities[i]->type == ENEMY)
         {
             UpdateEnemyAI(gameData, gameData->entities[i], currentTick);
+            if (gameData->entities[i]->state == ALIVE)
+            {
+                if (currentTick - gameData->entities[i]->movementAnimation.lastFrameTick >= gameData->entities[i]->movementAnimation.ticksPerFrame)
+                {
+                    gameData->entities[i]->movementAnimation.currentFrame = (gameData->entities[i]->movementAnimation.currentFrame + 1) % gameData->entities[i]->movementAnimation.frameCount;
+                    gameData->entities[i]->movementAnimation.lastFrameTick = currentTick;
+                }
+            }
+            else if (gameData->entities[i]->state == DYING)
+            {
+                if (currentTick - gameData->entities[i]->deathAnimation.lastFrameTick >= gameData->entities[i]->deathAnimation.ticksPerFrame)
+                {
+                    gameData->entities[i]->deathAnimation.currentFrame = (gameData->entities[i]->deathAnimation.currentFrame + 1);
+                    gameData->entities[i]->deathAnimation.lastFrameTick = currentTick;
+                }
+                if (gameData->entities[i]->deathAnimation.currentFrame >= gameData->entities[i]->deathAnimation.frameCount)
+                {
+					gameData->entities[i]->type = NONE;
+
+                }
+            }
         }
         if (gameData->entities[i]->type == PLAYER_PROJECTILE)
         {
 			UpdateProjectileCollisions(gameData, gameData->entities[i]);
+        }
+        if (gameData->entities[i]->type == PLAYER)
+        {
+            if (gameData->entities[i]->state == DYING)
+            {
+                if (currentTick - gameData->entities[i]->deathAnimation.lastFrameTick >= gameData->entities[i]->deathAnimation.ticksPerFrame)
+                {
+                    gameData->entities[i]->deathAnimation.currentFrame = (gameData->entities[i]->deathAnimation.currentFrame + 1);
+                    gameData->entities[i]->deathAnimation.lastFrameTick = currentTick;
+                }
+                if (gameData->entities[i]->deathAnimation.currentFrame >= gameData->entities[i]->deathAnimation.frameCount)
+                {
+                    gameData->entities[i]->type = NONE;
+                    for (int i = 0; i < MAX_ENTITIES; i++)
+                    {
+                        free(gameData->entities[i]);
+                    }
+                    initializeGame(gameData);
+                    return;
+                }
+            }
         }
     }
 
@@ -359,7 +422,11 @@ void Draw(RenderTexture2D target, GameData* gameData, Texture2D* spritesheet)
         Rectangle spritePosition = (Rectangle){(int)(gameData->entities[i]->position.x - (gameData->entities[i]->size / 2.0f)), (int)(gameData->entities[i]->position.y - (gameData->entities[i]->size / 2.0f)),(int)gameData->entities[i]->size, (int)gameData->entities[i]->size };
         if (gameData->entities[i]->type == PLAYER)
         {
-            DrawTexturePro(*spritesheet, (Rectangle) { 1, 70, 16, 16 }, spritePosition, (Vector2) { 0, 0 }, 0.0f, WHITE);
+            if (gameData->entities[i]->state == ALIVE) DrawTexturePro(*spritesheet, (Rectangle) { 1, 70, 16, 16 }, spritePosition, (Vector2) { 0, 0 }, 0.0f, WHITE);
+            else if (gameData->entities[i]->state == DYING)
+            {
+                DrawTexturePro(*spritesheet, gameData->entities[i]->deathAnimation.frames[gameData->entities[i]->deathAnimation.currentFrame], spritePosition, (Vector2) { 0, 0 }, 0.0f, WHITE);
+            }
         }
         if (gameData->entities[i]->type == PLAYER_PROJECTILE || gameData->entities[i]->type == ENEMY_PROJECTILE)
         {
@@ -367,10 +434,15 @@ void Draw(RenderTexture2D target, GameData* gameData, Texture2D* spritesheet)
         }
         if (gameData->entities[i]->type == ENEMY)
         {
-            if (gameData->entities[i]->data.enemyData.type == 0) 
-                DrawTexturePro(*spritesheet, (Rectangle) { 1, 34, 16, 16 }, spritePosition, (Vector2) { 0, 0 }, 0.0f, WHITE);
-			else if (gameData->entities[i]->data.enemyData.type == 1)
-                DrawTexturePro(*spritesheet, (Rectangle) { 1, 17, 16, 16 }, spritePosition, (Vector2) { 0, 0 }, 0.0f, WHITE);
+            if (gameData->entities[i]->state == ALIVE)
+            {
+                DrawTexturePro(*spritesheet, gameData->entities[i]->movementAnimation.frames[gameData->entities[i]->movementAnimation.currentFrame], spritePosition, (Vector2) { 0, 0 }, 0.0f, WHITE);
+            }
+            else if (gameData->entities[i]->state == DYING)
+            {
+                DrawTexturePro(*spritesheet, gameData->entities[i]->deathAnimation.frames[gameData->entities[i]->deathAnimation.currentFrame], spritePosition, (Vector2) { 0, 0 }, 0.0f, WHITE);
+			}
+            
         }
 
     }
@@ -384,7 +456,7 @@ void Draw(RenderTexture2D target, GameData* gameData, Texture2D* spritesheet)
     ClearBackground(BLACK);
     DrawTexturePro(target.texture,
         (Rectangle) {0, 0, 224.0f, -256.0f},   // source (negative height flips it)
-        (Rectangle) {0, 0, (float)screenWidth, (float)screenHeight}, // destination
+        (Rectangle) {0, 0, (float)screenWidth, (float)screenHeight}, 
         (Vector2) {0, 0},
         0.0f,
         WHITE
@@ -414,6 +486,61 @@ void cleanup(GameData* gameData)
 	}
     if (gameData->entities != NULL) free(gameData->entities);
     if (gameData->enemyFormation != NULL) free(gameData->enemyFormation);
+
+    for (int i = 0; i < 4; i++)
+    {
+        free(animations[i]);
+    }
+    free(animations);
+}
+
+void loadAnimations()
+{
+    // Blue enemy movement
+    animations[0] = malloc(sizeof(Animation));
+    animations[0]->frames = malloc(sizeof(Rectangle) * 3);
+    animations[0]->frames[0] = (Rectangle){ 1, 34, 16, 16 };
+    animations[0]->frames[1] = (Rectangle){ 18, 34, 16, 16 };
+    animations[0]->frames[2] = (Rectangle){ 35, 34, 16, 16 };
+    animations[0]->frameCount = 3;
+    animations[0]->currentFrame = 0;
+    animations[0]->ticksPerFrame = 50;
+    animations[0]->lastFrameTick = 0;
+
+    // Purple enemy movement
+    animations[1] = malloc(sizeof(Animation));
+    animations[1]->frames = malloc(sizeof(Rectangle) * 3);
+    animations[1]->frames[0] = (Rectangle){ 1, 17, 16, 16 };
+    animations[1]->frames[1] = (Rectangle){ 18, 17, 16, 16 };
+    animations[1]->frames[2] = (Rectangle){ 35, 17, 16, 16 };
+    animations[1]->frameCount = 3;
+    animations[1]->currentFrame = 0;
+    animations[1]->ticksPerFrame = 50;
+    animations[1]->lastFrameTick = 0;
+
+    // Enemy death
+    animations[2] = malloc(sizeof(Animation));
+    animations[2]->frames = malloc(sizeof(Rectangle) * 4);
+    animations[2]->frames[0] = (Rectangle){ 61, 70, 16, 16 };
+    animations[2]->frames[1] = (Rectangle){ 78, 70, 16, 16 };
+    animations[2]->frames[2] = (Rectangle){ 95, 70, 16, 16 };
+    animations[2]->frames[3] = (Rectangle){ 112, 70, 16, 16 };
+    animations[2]->frameCount = 4;
+    animations[2]->currentFrame = 0;
+    animations[2]->ticksPerFrame = 15;
+    animations[2]->lastFrameTick = 0;
+
+    // Player death
+    animations[3] = malloc(sizeof(Animation));
+    animations[3]->frames = malloc(sizeof(Rectangle) * 4);
+    animations[3]->frames[0] = (Rectangle){ 1, 87, 32, 32 };
+    animations[3]->frames[1] = (Rectangle){ 34, 87, 32, 32 };
+    animations[3]->frames[2] = (Rectangle){ 67, 87, 32, 32 };
+    animations[3]->frames[3] = (Rectangle){ 100, 87, 32, 32 };
+    animations[3]->frameCount = 4;
+    animations[3]->currentFrame = 0;
+    animations[3]->ticksPerFrame = 15;
+    animations[3]->lastFrameTick = 0;
 }
 
 int main()
@@ -438,7 +565,7 @@ int main()
 	}
 
     Image spritesheetImage = LoadImage("res/Spritesheet.png");
-    ImageFormat(&spritesheetImage, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8); // add alpha channel
+    ImageFormat(&spritesheetImage, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8); 
     ImageColorReplace(&spritesheetImage, BLACK, (Color) { 0, 0, 0, 0 });
     Texture2D spritesheet = LoadTextureFromImage(spritesheetImage);
     UnloadImage(spritesheetImage);
@@ -456,6 +583,10 @@ int main()
 	soundEffects[3] = LoadSound("res/03.Shoot.mp3");
     soundEffects[4] = LoadSound("res/04. Fighter Loss.mp3");
     soundEffects[7] = LoadSound("res/07. Hit Enemy.mp3");
+
+	animations = malloc(sizeof(Animation*) * 4);
+
+	loadAnimations();
 
 	GameData* gameData = calloc(1, sizeof(GameData));
     assert(gameData != NULL);
