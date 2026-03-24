@@ -195,7 +195,7 @@ void shootProjectile(GameData* gameData, Entity* shooter)
     {
         projectileType = PLAYER_PROJECTILE;
         gameData->playerProjectileCount++;
-		PlaySound(soundEffects[3]);
+		PlaySound(soundEffects[1]);
     }
     else if (shooter->type == ENEMY) projectileType = ENEMY_PROJECTILE;
     
@@ -288,7 +288,7 @@ void UpdateProjectileCollisions(GameData* gameData, Entity* playerProjectile)
                 gameData->entities[j]->state = DYING;
                 gameData->playerProjectileCount--;
                 gameData->score += 20;
-                PlaySound(soundEffects[7]);
+                PlaySound(soundEffects[3]);
                 if (gameData->entities[j]->data.enemyData.behaviour == DIVING)
                 {
                     gameData->enemyFormation->divingEnemies--;
@@ -313,10 +313,19 @@ void UpdatePlayerCollisions(GameData* gameData)
             {
                 gameData->player->state = DYING;
                 gameData->entities[j]->type = NONE;
-                PlaySound(soundEffects[4]);
+                PlaySound(soundEffects[2]);
             }
         }
     }
+}
+
+void restartScreen()
+{
+    BeginDrawing();
+	DrawText("GAME OVER", screenWidth / 2 - MeasureText("GAME OVER", 60) / 2, screenHeight / 2 - 30, 60, WHITE);
+    EndDrawing();
+	WaitTime(5.0);
+    return;
 }
 
 void Update(GameData* gameData, int currentTick)
@@ -369,6 +378,7 @@ void Update(GameData* gameData, int currentTick)
                 if (gameData->entities[i]->deathAnimation.currentFrame >= gameData->entities[i]->deathAnimation.frameCount)
                 {
                     gameData->entities[i]->type = NONE;
+                    restartScreen();
                     for (int i = 0; i < MAX_ENTITIES; i++)
                     {
                         free(gameData->entities[i]);
@@ -474,7 +484,7 @@ void HandleInput(GameData* gameData, Entity* player)
 
 void cleanup(GameData* gameData)
 {
-    for (int i = 0; i < 8; i++)
+    for (int i = 0; i < 4; i++)
     {
         UnloadSound(soundEffects[i]);
     }
@@ -576,13 +586,13 @@ int main()
         printf("Failed to load spritesheet\n");
     }
 
-	soundEffects = malloc(sizeof(Sound) * 8);
+	soundEffects = malloc(sizeof(Sound) * 4);
     assert(soundEffects != NULL);
     soundEffects[0] = LoadSound("res/Battle Theme.mp3");
     SetSoundVolume(soundEffects[0], 0.5f);
-	soundEffects[3] = LoadSound("res/03.Shoot.mp3");
-    soundEffects[4] = LoadSound("res/04. Fighter Loss.mp3");
-    soundEffects[7] = LoadSound("res/07. Hit Enemy.mp3");
+	soundEffects[1] = LoadSound("res/03.Shoot.mp3");
+    soundEffects[2] = LoadSound("res/04. Fighter Loss.mp3");
+    soundEffects[3] = LoadSound("res/07. Hit Enemy.mp3");
 
 	animations = malloc(sizeof(Animation*) * 4);
 
